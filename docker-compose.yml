@@ -1,0 +1,35 @@
+services:
+  rule-manager:
+    build: .
+    container_name: acl4ssr-rule-manager
+    restart: unless-stopped
+    ports:
+      - "8080:3000"
+    environment:
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:8080}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me}
+      AUTH_SECRET: ${AUTH_SECRET:-replace-with-a-random-string-at-least-16-chars}
+      DATABASE_URL: ${DATABASE_URL:-file:/data/app.db}
+      SUBCONVERTER_URL: ${SUBCONVERTER_URL:-http://subconverter:25500}
+      ACL4SSR_BASE_CONFIG_URL: ${ACL4SSR_BASE_CONFIG_URL:-https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/config/ACL4SSR_Online_Full_Google.ini}
+      DEFAULT_PROFILE_TOKEN: ${DEFAULT_PROFILE_TOKEN:-}
+    volumes:
+      - data:/data
+    depends_on:
+      - subconverter
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  subconverter:
+    image: tindy2013/subconverter:latest
+    container_name: acl4ssr-subconverter
+    restart: unless-stopped
+    expose:
+      - "25500"
+
+volumes:
+  data:

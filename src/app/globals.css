@@ -1,0 +1,85 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 210 20% 98%;
+  --foreground: 220 18% 12%;
+  --card: 0 0% 100%;
+  --card-foreground: 220 18% 12%;
+  --muted: 210 20% 94%;
+  --muted-foreground: 220 8% 42%;
+  --accent: 174 45% 92%;
+  --accent-foreground: 184 70% 18%;
+  --primary: 184 72% 28%;
+  --primary-foreground: 0 0% 100%;
+  --destructive: 0 70% 44%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 214 18% 86%;
+  --input: 214 18% 86%;
+  --ring: 184 72% 32%;
+}
+
+.dark {
+  --background: 220 18% 10%;
+  --foreground: 210 20% 96%;
+  --card: 220 16% 14%;
+  --card-foreground: 210 20% 96%;
+  --muted: 220 16% 18%;
+  --muted-foreground: 215 11% 66%;
+  --accent: 184 36% 20%;
+  --accent-foreground: 174 66% 88%;
+  --primary: 176 62% 42%;
+  --primary-foreground: 220 18% 10%;
+  --destructive: 0 62% 46%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 220 12% 24%;
+  --input: 220 12% 24%;
+  --ring: 176 62% 48%;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
+.scrollbar-thin {
+  scrollbar-color: hsl(var(--muted-foreground)) transparent;
+  scrollbar-width: thin;
+}
+
+.login-panel {
+  width: min(24rem, calc(100vw - 2rem));
+  max-width: calc(100vw - 2rem);
+}
+
+@media (max-width: 639px) {
+  .login-panel {
+    width: min(18rem, calc(100vw - 2rem));
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "dist-seed",
+    "rootDir": ".",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "isolatedModules": false,
+    "incremental": false,
+    "plugins": []
+  },
+  "include": [
+    "prisma/seed.ts",
+    "src/lib/constants.ts",
+    "src/lib/prisma-mappers.ts",
+    "src/lib/rules/engine.ts",
+    "src/lib/rules/types.ts"
+  ]
+}
