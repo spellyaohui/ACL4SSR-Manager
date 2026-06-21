@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { applyProfileNodeFilters, managedNodeSourceUrl } from "./upstream";
+import {
+  applyProfileNodeFilters,
+  makeCustomRulesetSlug,
+  managedNodeSourceUrl,
+  parseCustomRulesetSlug,
+} from "./upstream";
 
 describe("applyProfileNodeFilters", () => {
   it("adds the profile node exclude regex to subconverter params", () => {
@@ -31,5 +36,14 @@ describe("managedNodeSourceUrl", () => {
     expect(managedNodeSourceUrl("https://acl4ssr.example.com/", "token123")).toBe(
       "https://acl4ssr.example.com/nodes/token123",
     );
+  });
+});
+
+describe("custom ruleset slugs", () => {
+  it("round-trips policy groups containing emoji and Chinese text", () => {
+    const slug = makeCustomRulesetSlug("💬 Ai平台");
+
+    expect(slug).toMatch(/\.list$/);
+    expect(parseCustomRulesetSlug(slug)).toBe("💬 Ai平台");
   });
 });

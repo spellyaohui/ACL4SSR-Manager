@@ -1,4 +1,5 @@
 import type { Profile } from "@prisma/client";
+import { Buffer } from "node:buffer";
 
 import { env } from "./env";
 import { prisma } from "./db";
@@ -9,6 +10,7 @@ import {
   filterRulesetContent,
   formatInlineRuleset,
   parseRulesetRefs,
+  toClashType,
 } from "./rules/engine";
 import type { ExpandedUpstreamRule, ManagedRule, UpstreamRulesetRef } from "./rules/types";
 
@@ -79,6 +81,16 @@ export function parseRulesetSlug(slug: string): number {
   return Number(match[1]);
 }
 
+export function makeCustomRulesetSlug(policyGroup: string): string {
+  return `${Buffer.from(policyGroup, "utf8").toString("base64url")}.list`;
+}
+
+export function parseCustomRulesetSlug(slug: string): string {
+  const normalized = slug.replace(/\.list$/, "");
+  if (!normalized) throw new Error("Invalid custom ruleset name");
+  return Buffer.from(normalized, "base64url").toString("utf8");
+}
+
 export async function getRulesForProfile(profileId: string): Promise<ManagedRule[]> {
   const rules = await prisma.rule.findMany({
     where: { profileId, deletedAt: null },
@@ -111,7 +123,15 @@ export async function buildDynamicConfig(profile: Profile, publicBaseUrl: string
   const hasFilters = activeRules.some((rule) => rule.mode === "FILTER");
   const refs = parseRulesetRefs(config);
   const refByRaw = new Map(refs.map((ref) => [ref.raw, ref]));
-  const customLines = activeRules.map(formatInlineRuleset);
+  const normalRules = activeRules.filter((rule) => rule.type !== "FINAL" && rule.type !== "MATCH");
+  const terminalRules = activeRules.filter((rule) => rule.type === "FINAL" || rule.type === "MATCH");
+  const customGroups = [...new Set(normalRules.map((rule) => rule.policyGroup))];
+  const customLines = [
+    ...customGroups.map((group) => (
+      `ruleset=${group},${publicBaseUrl}/custom-rulesets/${profile.token}/${makeCustomRulesetSlug(group)}`
+    )),
+    ...terminalRules.map(formatInlineRuleset),
+  ];
   let inserted = false;
 
   const output = config.split(/\r?\n/).map((line) => {
@@ -119,14 +139,18 @@ export async function buildDynamicConfig(profile: Profile, publicBaseUrl: string
     if (profile.nodeExcludeRegex?.trim() && trimmed.startsWith("exclude_remarks=")) {
       return `exclude_remarks=${profile.nodeExcludeRegex.trim()}`;
     }
+    if (!inserted && trimmed.startsWith("ruleset=")) {
+      inserted = true;
+      const ref = refByRaw.get(trimmed);
+      const firstRuleLine = ref && hasFilters && ref.source.startsWith("http")
+        ? `ruleset=${ref.group},${publicBaseUrl}/rulesets/${profile.token}/${makeRulesetSlug(ref)}`
+        : line;
+      return [...customLines, firstRuleLine].join("\n");
+    }
     const ref = refByRaw.get(trimmed);
     if (ref && hasFilters && ref.source.startsWith("http")) {
       const slug = makeRulesetSlug(ref);
       return `ruleset=${ref.group},${publicBaseUrl}/rulesets/${profile.token}/${slug}`;
-    }
-    if (!inserted && trimmed.startsWith("ruleset=")) {
-      inserted = true;
-      return [...customLines, line].join("\n");
     }
     return line;
   });
@@ -153,6 +177,22 @@ export async function getFilteredRuleset(profile: Profile, slug: string): Promis
   const content = await getCachedText(ref.source);
   const rules = await getRulesForProfile(profile.id);
   return filterRulesetContent(content, rules);
+}
+
+export async function getCustomRuleset(profile: Profile, slug: string): Promise<string> {
+  const policyGroup = parseCustomRulesetSlug(slug);
+  const rules = await getRulesForProfile(profile.id);
+  const lines = rules
+    .filter((rule) => (
+      rule.enabled &&
+      rule.mode !== "DIAGNOSE" &&
+      rule.policyGroup === policyGroup &&
+      rule.type !== "FINAL" &&
+      rule.type !== "MATCH"
+    ))
+    .map((rule) => `${toClashType(rule.type)},${rule.value}`);
+
+  return lines.join("\n");
 }
 
 export function applyProfileNodeFilters(

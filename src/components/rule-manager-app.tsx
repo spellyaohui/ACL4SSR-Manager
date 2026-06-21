@@ -461,23 +461,36 @@ export function RuleManagerApp() {
     setPreview(data.data);
   }
 
+  async function updateProfilePatch(patch: Partial<Pick<Profile, "name" | "description" | "defaultTarget" | "upstreamConfigUrl" | "nodeExcludeRegex">>, message: string) {
+    if (!selectedProfile) return;
+    const data = await api<{ data: Profile }>(`/api/profiles/${selectedProfile.id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+    setProfiles((current) => current.map((profile) => profile.id === data.data.id ? { ...profile, ...data.data } : profile));
+    setPreview(null);
+    setStatus(message);
+  }
+
   async function updateSelectedProfile(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedProfile) return;
     const form = new FormData(event.currentTarget);
-    const data = await api<{ data: Profile }>(`/api/profiles/${selectedProfile.id}`, {
-      method: "PATCH",
-      body: JSON.stringify({
-        name: selectedProfile.name,
-        description: selectedProfile.description,
-        defaultTarget: form.get("defaultTarget") || "clash",
-        upstreamConfigUrl: form.get("upstreamConfigUrl"),
-        nodeExcludeRegex: form.get("nodeExcludeRegex") || null,
-      }),
-    });
-    setProfiles((current) => current.map((profile) => profile.id === data.data.id ? { ...profile, ...data.data } : profile));
-    setPreview(null);
-    setStatus("设置已保存");
+    await updateProfilePatch({
+      name: selectedProfile.name,
+      description: selectedProfile.description,
+      defaultTarget: String(form.get("defaultTarget") || "clash"),
+      upstreamConfigUrl: String(form.get("upstreamConfigUrl") || selectedProfile.upstreamConfigUrl),
+      nodeExcludeRegex: String(form.get("nodeExcludeRegex") || "").trim() || null,
+    }, "设置已保存");
+  }
+
+  async function updateNodeFilter(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    await updateProfilePatch({
+      nodeExcludeRegex: String(form.get("nodeExcludeRegex") || "").trim() || null,
+    }, "节点过滤已保存，下一次订阅生成会自动生效");
   }
 
   async function logout() {
@@ -578,9 +591,11 @@ export function RuleManagerApp() {
 
             {activeTab === "sources" ? (
               <SourcesView
+                selectedProfile={selectedProfile}
                 sources={sources}
                 editingSource={editingSource}
                 onCreate={createOrUpdateSource}
+                onUpdateNodeFilter={updateNodeFilter}
                 onEdit={setEditingSource}
                 onCancelEdit={() => setEditingSource(null)}
                 onToggle={toggleSource}
@@ -619,7 +634,7 @@ export function RuleManagerApp() {
             ) : null}
 
             {activeTab === "preview" ? (
-              <PreviewView preview={preview} onLoad={loadPreview} />
+              <PreviewView selectedProfile={selectedProfile} preview={preview} onLoad={loadPreview} />
             ) : null}
 
             {activeTab === "settings" ? (
@@ -707,18 +722,22 @@ function ProfilesView({ profiles, onCreate }: { profiles: Profile[]; onCreate: (
 }
 
 function SourcesView({
+  selectedProfile,
   sources,
   editingSource,
   onCreate,
+  onUpdateNodeFilter,
   onEdit,
   onCancelEdit,
   onToggle,
   onDelete,
   onReload,
 }: {
+  selectedProfile?: Profile;
   sources: Source[];
   editingSource: Source | null;
   onCreate: (event: React.FormEvent<HTMLFormElement>) => void;
+  onUpdateNodeFilter: (event: React.FormEvent<HTMLFormElement>) => void;
   onEdit: (source: Source) => void;
   onCancelEdit: () => void;
   onToggle: (source: Source) => void;
@@ -752,32 +771,59 @@ function SourcesView({
           </tbody>
         </table>
       </TableShell>
-      <form key={editingSource?.id ?? "new-source"} onSubmit={onCreate} className="rounded-lg border border-border bg-card p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold">{editingSource ? "编辑订阅源" : "添加订阅源"}</h2>
-          <div className="flex gap-1">
-            {editingSource ? <Button type="button" variant="ghost" onClick={onCancelEdit}>取消</Button> : null}
-            <Button type="button" variant="ghost" onClick={onReload}><RefreshCw size={15} />刷新</Button>
+      <div className="grid content-start gap-4">
+        <form key={`node-filter-${selectedProfile?.id ?? "none"}`} onSubmit={onUpdateNodeFilter} className="rounded-lg border border-border bg-card p-4">
+          <div className="mb-3">
+            <h2 className="text-sm font-semibold">节点过滤</h2>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              过滤节点名称命中的内容，例如 <span className="font-mono">官网|流量</span>。
+            </p>
           </div>
-        </div>
-        <div className="grid gap-3">
-          <Field label="名称"><input className={inputClass()} name="name" required defaultValue={editingSource?.name ?? ""} placeholder="机场 A / 手动节点" /></Field>
-          <Field label="类型">
-            <select className={inputClass()} name="type" defaultValue={editingSource?.type ?? "SUBSCRIPTION"}>
-              <option value="SUBSCRIPTION">机场订阅 URL</option>
-              <option value="NODE">单条节点直链</option>
-              <option value="BULK">批量节点</option>
-            </select>
-          </Field>
-          <Field label="内容"><textarea className={inputClass()} name="value" required rows={7} defaultValue={editingSource?.value ?? ""} placeholder="https://... 或 vmess://..." /></Field>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Tag"><input className={inputClass()} name="tag" defaultValue={editingSource?.tag ?? ""} placeholder="可选" /></Field>
-            <Field label="排序"><input className={inputClass()} name="sortOrder" type="number" defaultValue={editingSource?.sortOrder ?? sources.length} /></Field>
+          <div className="grid gap-3">
+            <Field label="排除正则">
+              <input
+                className={inputClass()}
+                name="nodeExcludeRegex"
+                defaultValue={selectedProfile?.nodeExcludeRegex ?? ""}
+                placeholder="官网|流量"
+                disabled={!selectedProfile}
+              />
+            </Field>
+            <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+              <span className="break-all">
+                当前：{selectedProfile?.nodeExcludeRegex ? <span className="font-mono">{selectedProfile.nodeExcludeRegex}</span> : "未启用"}
+              </span>
+              <Button type="submit" variant="secondary" disabled={!selectedProfile}>保存过滤</Button>
+            </div>
           </div>
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="enabled" defaultChecked={editingSource?.enabled ?? true} />启用</label>
-          <Button type="submit"><Plus size={16} />{editingSource ? "保存" : "添加"}</Button>
-        </div>
-      </form>
+        </form>
+        <form key={editingSource?.id ?? "new-source"} onSubmit={onCreate} className="rounded-lg border border-border bg-card p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold">{editingSource ? "编辑订阅源" : "添加订阅源"}</h2>
+            <div className="flex gap-1">
+              {editingSource ? <Button type="button" variant="ghost" onClick={onCancelEdit}>取消</Button> : null}
+              <Button type="button" variant="ghost" onClick={onReload}><RefreshCw size={15} />刷新</Button>
+            </div>
+          </div>
+          <div className="grid gap-3">
+            <Field label="名称"><input className={inputClass()} name="name" required defaultValue={editingSource?.name ?? ""} placeholder="机场 A / 手动节点" /></Field>
+            <Field label="类型">
+              <select className={inputClass()} name="type" defaultValue={editingSource?.type ?? "SUBSCRIPTION"}>
+                <option value="SUBSCRIPTION">机场订阅 URL</option>
+                <option value="NODE">单条节点直链</option>
+                <option value="BULK">批量节点</option>
+              </select>
+            </Field>
+            <Field label="内容"><textarea className={inputClass()} name="value" required rows={7} defaultValue={editingSource?.value ?? ""} placeholder="https://... 或 vmess://..." /></Field>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Tag"><input className={inputClass()} name="tag" defaultValue={editingSource?.tag ?? ""} placeholder="可选" /></Field>
+              <Field label="排序"><input className={inputClass()} name="sortOrder" type="number" defaultValue={editingSource?.sortOrder ?? sources.length} /></Field>
+            </div>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="enabled" defaultChecked={editingSource?.enabled ?? true} />启用</label>
+            <Button type="submit"><Plus size={16} />{editingSource ? "保存" : "添加"}</Button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
@@ -911,10 +957,24 @@ function RulesView({
   );
 }
 
-function PreviewView({ preview, onLoad }: { preview: { config: string; subscriptionUrl: string; subconverterUrl: string; rulePreview: string[]; sourceItems: string[] } | null; onLoad: () => void }) {
+function PreviewView({
+  selectedProfile,
+  preview,
+  onLoad,
+}: {
+  selectedProfile?: Profile;
+  preview: { config: string; subscriptionUrl: string; subconverterUrl: string; rulePreview: string[]; sourceItems: string[] } | null;
+  onLoad: () => void;
+}) {
   return (
     <div className="grid gap-4">
-      <div className="flex justify-end">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-card p-3 text-sm">
+        <div>
+          <div className="font-medium">节点过滤</div>
+          <div className="mt-1 break-all text-xs text-muted-foreground">
+            {selectedProfile?.nodeExcludeRegex ? <span className="font-mono">{selectedProfile.nodeExcludeRegex}</span> : "未启用"}
+          </div>
+        </div>
         <Button onClick={onLoad}><RefreshCw size={16} />生成预览</Button>
       </div>
       {preview ? (

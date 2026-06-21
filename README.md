@@ -261,7 +261,7 @@ npm run build
 2. 平台读取当前 Profile、启用的订阅源、自定义规则和规则模式。
 3. 启用订阅源按排序拼成 `source1|source2|source3`，先由 `/nodes/:profileToken` 调用 subconverter 转成 `mixed` 纯节点源，避免机场 Clash 订阅自带规则覆盖 ACL4SSR 规则。
 4. 平台生成动态外部配置 `/config/:profileToken.ini`：
-   - 手工规则在上游规则之前。
+   - 手工规则按策略组生成 `/custom-rulesets/:profileToken/:rulesetName.list`，并排在上游规则之前。
    - `过滤上游` 规则会把对应上游 ruleset URL 替换成本平台的过滤版地址。
 5. 平台调用内部 `SUBCONVERTER_URL/sub?...`，其中 `url=` 指向本平台 `/nodes/:profileToken`，`config=` 指向本平台 `/config/:profileToken.ini`。
 6. 返回最终 Clash/Mihomo YAML。
@@ -280,7 +280,7 @@ npm run build
 
 ### 多机场订阅怎么合并？
 
-在“订阅源”页面添加多个机场订阅 URL，启用后按排序合并。平台会用 `|` 拼接并 URL Encode 后传给 subconverter。
+在“订阅源”页面添加多个机场订阅 URL，启用后按排序合并。平台会用 `|` 拼接后先转成 `mixed` 纯节点源，再进入最终配置生成。
 
 ### 直链节点怎么输入？
 
@@ -288,7 +288,7 @@ npm run build
 
 ### 如何过滤机场里不想要的节点？
 
-在“设置”页面填写“节点排除正则”。例如：
+在“订阅源”页面右侧的“节点过滤”里填写“排除正则”；“生成预览”页面也会显示当前过滤状态。例如：
 
 ```text
 官网|流量
