@@ -82,12 +82,14 @@ async function ensureSchema() {
       "defaultTarget" TEXT NOT NULL DEFAULT 'clash',
       "upstreamConfigUrl" TEXT NOT NULL,
       "nodeExcludeRegex" TEXT,
+      "subscriptionInfoSourceId" TEXT,
       "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       "updatedAt" DATETIME NOT NULL,
       "deletedAt" DATETIME
     )
   `);
   await prisma.$executeRawUnsafe(`ALTER TABLE "Profile" ADD COLUMN "nodeExcludeRegex" TEXT`).catch(() => undefined);
+  await prisma.$executeRawUnsafe(`ALTER TABLE "Profile" ADD COLUMN "subscriptionInfoSourceId" TEXT`).catch(() => undefined);
   await prisma.$executeRawUnsafe(`
     CREATE TABLE IF NOT EXISTS "ProfileSource" (
       "id" TEXT NOT NULL PRIMARY KEY,

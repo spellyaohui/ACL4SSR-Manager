@@ -23,6 +23,7 @@ export const ProfileCreateSchema = z.object({
   defaultTarget: z.string().min(1).max(40).default("clash"),
   upstreamConfigUrl: z.string().url().optional(),
   nodeExcludeRegex: OptionalRegexSchema,
+  subscriptionInfoSourceId: z.string().max(100).optional().nullable(),
 });
 
 export const ProfileUpdateSchema = ProfileCreateSchema.partial();

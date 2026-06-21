@@ -47,6 +47,38 @@ export function parseSubscriptionUserInfo(header: string | null): SubscriptionUs
   };
 }
 
+function parseStoredSourceStatus(value: string | null): SourceStatus | null {
+  if (!value) return null;
+  try {
+    return JSON.parse(value) as SourceStatus;
+  } catch {
+    return null;
+  }
+}
+
+export function buildSubscriptionUserInfoHeader(sources: Pick<ProfileSource, "lastStatus">[]): string | null {
+  const infos = sources
+    .map((source) => parseStoredSourceStatus(source.lastStatus)?.userInfo)
+    .filter((info): info is SubscriptionUserInfo => Boolean(info));
+
+  if (!infos.length) return null;
+
+  const upload = infos.reduce((sum, info) => sum + info.upload, 0);
+  const download = infos.reduce((sum, info) => sum + info.download, 0);
+  const total = infos.reduce((sum, info) => sum + info.total, 0);
+  const expires = infos
+    .map((info) => info.expire)
+    .filter((expire): expire is number => typeof expire === "number" && Number.isFinite(expire));
+  const expire = expires.length ? Math.min(...expires) : null;
+
+  return [
+    `upload=${Math.max(0, Math.trunc(upload))}`,
+    `download=${Math.max(0, Math.trunc(download))}`,
+    `total=${Math.max(0, Math.trunc(total))}`,
+    expire === null ? null : `expire=${Math.trunc(expire)}`,
+  ].filter(Boolean).join("; ");
+}
+
 function shouldRefreshSource(source: ProfileSource, force: boolean): boolean {
   if (source.type !== "SUBSCRIPTION" || !source.enabled) return false;
   if (!/^https?:\/\//i.test(source.value.trim())) return false;
@@ -97,4 +129,32 @@ export async function refreshSourceMetadata(sources: ProfileSource[], force = fa
       },
     });
   }));
+}
+
+export async function getProfileSubscriptionUserInfoHeader(profileId: string): Promise<string | null> {
+  const profile = await prisma.profile.findUnique({
+    where: { id: profileId },
+    select: { subscriptionInfoSourceId: true },
+  });
+  const sources = await prisma.profileSource.findMany({
+    where: {
+      profileId,
+      type: "SUBSCRIPTION",
+      enabled: true,
+      ...(profile?.subscriptionInfoSourceId ? { id: profile.subscriptionInfoSourceId } : {}),
+    },
+  });
+
+  await refreshSourceMetadata(sources);
+
+  const refreshedSources = await prisma.profileSource.findMany({
+    where: {
+      profileId,
+      type: "SUBSCRIPTION",
+      enabled: true,
+      ...(profile?.subscriptionInfoSourceId ? { id: profile.subscriptionInfoSourceId } : {}),
+    },
+  });
+
+  return buildSubscriptionUserInfoHeader(refreshedSources);
 }

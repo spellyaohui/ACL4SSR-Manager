@@ -13,15 +13,23 @@ describe("applyProfileNodeFilters", () => {
       nodeExcludeRegex: "官网|流量",
     });
 
-    expect(params.get("exclude_remarks")).toBe("官网|流量");
+    expect(params.get("exclude")).toBe("官网|流量");
   });
 
-  it("keeps an explicit request exclude_remarks parameter", () => {
+  it("keeps an explicit request exclude parameter", () => {
+    const params = applyProfileNodeFilters(new URLSearchParams("exclude=倍率"), {
+      nodeExcludeRegex: "官网|流量",
+    });
+
+    expect(params.get("exclude")).toBe("倍率");
+  });
+
+  it("maps an explicit exclude_remarks request parameter to exclude", () => {
     const params = applyProfileNodeFilters(new URLSearchParams("exclude_remarks=倍率"), {
       nodeExcludeRegex: "官网|流量",
     });
 
-    expect(params.get("exclude_remarks")).toBe("倍率");
+    expect(params.get("exclude")).toBe("倍率");
   });
 });
 

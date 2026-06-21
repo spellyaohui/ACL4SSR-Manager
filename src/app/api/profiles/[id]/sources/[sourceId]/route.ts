@@ -28,6 +28,10 @@ export async function DELETE(
   const auth = await requireApiAuth(request);
   if (auth) return auth;
   const { sourceId } = await context.params;
+  await prisma.profile.updateMany({
+    where: { subscriptionInfoSourceId: sourceId },
+    data: { subscriptionInfoSourceId: null },
+  });
   await prisma.profileSource.delete({ where: { id: sourceId } });
   return apiOk({ ok: true });
 }

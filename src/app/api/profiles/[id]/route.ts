@@ -10,6 +10,16 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   const body = await parseJson(request, ProfileUpdateSchema);
   if (body instanceof NextResponse) return body;
   const { id } = await context.params;
+  if (body.subscriptionInfoSourceId) {
+    const source = await prisma.profileSource.findFirst({
+      where: {
+        id: body.subscriptionInfoSourceId,
+        profileId: id,
+        type: "SUBSCRIPTION",
+      },
+    });
+    if (!source) return apiError("VALIDATION_ERROR", "流量/到期来源必须是当前 Profile 的机场订阅 URL", 422);
+  }
 
   const profile = await prisma.profile.update({
     where: { id },
@@ -19,6 +29,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       defaultTarget: body.defaultTarget,
       upstreamConfigUrl: body.upstreamConfigUrl,
       nodeExcludeRegex: body.nodeExcludeRegex === undefined ? undefined : body.nodeExcludeRegex?.trim() || null,
+      subscriptionInfoSourceId: body.subscriptionInfoSourceId === undefined ? undefined : body.subscriptionInfoSourceId || null,
     },
   });
   return apiOk({ data: profile });

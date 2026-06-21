@@ -28,6 +28,7 @@ type Profile = {
   defaultTarget: string;
   upstreamConfigUrl: string;
   nodeExcludeRegex: string | null;
+  subscriptionInfoSourceId: string | null;
   _count?: { sources: number; rules: number };
 };
 
@@ -503,7 +504,7 @@ export function RuleManagerApp() {
     setPreview(data.data);
   }
 
-  async function updateProfilePatch(patch: Partial<Pick<Profile, "name" | "description" | "defaultTarget" | "upstreamConfigUrl" | "nodeExcludeRegex">>, message: string) {
+  async function updateProfilePatch(patch: Partial<Pick<Profile, "name" | "description" | "defaultTarget" | "upstreamConfigUrl" | "nodeExcludeRegex" | "subscriptionInfoSourceId">>, message: string) {
     if (!selectedProfile) return;
     const data = await api<{ data: Profile }>(`/api/profiles/${selectedProfile.id}`, {
       method: "PATCH",
@@ -524,6 +525,7 @@ export function RuleManagerApp() {
       defaultTarget: String(form.get("defaultTarget") || "clash"),
       upstreamConfigUrl: String(form.get("upstreamConfigUrl") || selectedProfile.upstreamConfigUrl),
       nodeExcludeRegex: String(form.get("nodeExcludeRegex") || "").trim() || null,
+      subscriptionInfoSourceId: String(form.get("subscriptionInfoSourceId") || "").trim() || null,
     }, "设置已保存");
   }
 
@@ -533,6 +535,14 @@ export function RuleManagerApp() {
     await updateProfilePatch({
       nodeExcludeRegex: String(form.get("nodeExcludeRegex") || "").trim() || null,
     }, "节点过滤已保存，下一次订阅生成会自动生效");
+  }
+
+  async function updateSubscriptionInfoSource(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    await updateProfilePatch({
+      subscriptionInfoSourceId: String(form.get("subscriptionInfoSourceId") || "").trim() || null,
+    }, "流量/到期来源已保存，下一次订阅响应会自动使用");
   }
 
   async function logout() {
@@ -638,6 +648,7 @@ export function RuleManagerApp() {
                 editingSource={editingSource}
                 onCreate={createOrUpdateSource}
                 onUpdateNodeFilter={updateNodeFilter}
+                onUpdateSubscriptionInfoSource={updateSubscriptionInfoSource}
                 onEdit={setEditingSource}
                 onCancelEdit={() => setEditingSource(null)}
                 onToggle={toggleSource}
@@ -680,7 +691,7 @@ export function RuleManagerApp() {
             ) : null}
 
             {activeTab === "settings" ? (
-              <SettingsView selectedProfile={selectedProfile} onSubmit={updateSelectedProfile} />
+              <SettingsView selectedProfile={selectedProfile} sources={sources} onSubmit={updateSelectedProfile} />
             ) : null}
           </div>
         </section>
@@ -769,6 +780,7 @@ function SourcesView({
   editingSource,
   onCreate,
   onUpdateNodeFilter,
+  onUpdateSubscriptionInfoSource,
   onEdit,
   onCancelEdit,
   onToggle,
@@ -780,12 +792,15 @@ function SourcesView({
   editingSource: Source | null;
   onCreate: (event: React.FormEvent<HTMLFormElement>) => void;
   onUpdateNodeFilter: (event: React.FormEvent<HTMLFormElement>) => void;
+  onUpdateSubscriptionInfoSource: (event: React.FormEvent<HTMLFormElement>) => void;
   onEdit: (source: Source) => void;
   onCancelEdit: () => void;
   onToggle: (source: Source) => void;
   onDelete: (source: Source) => void;
   onReload: () => void;
 }) {
+  const subscriptionSources = sources.filter((source) => source.type === "SUBSCRIPTION");
+  const selectedInfoSource = sources.find((source) => source.id === selectedProfile?.subscriptionInfoSourceId);
   return (
     <div className="grid gap-4 xl:grid-cols-[1fr_420px]">
       <TableShell>
@@ -829,11 +844,40 @@ function SourcesView({
         </table>
       </TableShell>
       <div className="grid content-start gap-4">
+        <form key={`subscription-info-${selectedProfile?.id ?? "none"}`} onSubmit={onUpdateSubscriptionInfoSource} className="rounded-lg border border-border bg-card p-4">
+          <div className="mb-3">
+            <h2 className="text-sm font-semibold">流量/到期来源</h2>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              指定 `/sub` 响应头里的用量和到期时间读取哪个机场订阅 URL。
+            </p>
+          </div>
+          <div className="grid gap-3">
+            <Field label="指定订阅源">
+              <select
+                className={inputClass()}
+                name="subscriptionInfoSourceId"
+                defaultValue={selectedProfile?.subscriptionInfoSourceId ?? ""}
+                disabled={!selectedProfile || !subscriptionSources.length}
+              >
+                <option value="">自动汇总所有机场订阅</option>
+                {subscriptionSources.map((source) => (
+                  <option key={source.id} value={source.id}>{source.name}{source.enabled ? "" : "（已停用）"}</option>
+                ))}
+              </select>
+            </Field>
+            <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+              <span className="break-all">
+                当前：{selectedInfoSource ? selectedInfoSource.name : "自动汇总所有机场订阅"}
+              </span>
+              <Button type="submit" variant="secondary" disabled={!selectedProfile}>保存来源</Button>
+            </div>
+          </div>
+        </form>
         <form key={`node-filter-${selectedProfile?.id ?? "none"}`} onSubmit={onUpdateNodeFilter} className="rounded-lg border border-border bg-card p-4">
           <div className="mb-3">
-            <h2 className="text-sm font-semibold">节点过滤</h2>
+            <h2 className="text-sm font-semibold">节点名称过滤</h2>
             <p className="mt-1 text-xs leading-5 text-muted-foreground">
-              过滤节点名称命中的内容，例如 <span className="font-mono">官网|流量</span>。
+              写入 subconverter 的 exclude_remarks，过滤节点名称命中的内容，例如 <span className="font-mono">官网|到期时间|剩余流量</span>。
             </p>
           </div>
           <div className="grid gap-3">
@@ -842,7 +886,7 @@ function SourcesView({
                 className={inputClass()}
                 name="nodeExcludeRegex"
                 defaultValue={selectedProfile?.nodeExcludeRegex ?? ""}
-                placeholder="官网|流量"
+                placeholder="官网|到期时间|剩余流量"
                 disabled={!selectedProfile}
               />
             </Field>
@@ -1049,7 +1093,16 @@ function PreviewView({
   );
 }
 
-function SettingsView({ selectedProfile, onSubmit }: { selectedProfile?: Profile; onSubmit: (event: React.FormEvent<HTMLFormElement>) => void }) {
+function SettingsView({
+  selectedProfile,
+  sources,
+  onSubmit,
+}: {
+  selectedProfile?: Profile;
+  sources: Source[];
+  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
+}) {
+  const subscriptionSources = sources.filter((source) => source.type === "SUBSCRIPTION");
   return (
     <form key={selectedProfile?.id ?? "no-profile"} onSubmit={onSubmit} className="grid gap-4 rounded-lg border border-border bg-card p-4">
       <h2 className="text-sm font-semibold">部署参数</h2>
@@ -1064,8 +1117,21 @@ function SettingsView({ selectedProfile, onSubmit }: { selectedProfile?: Profile
         <Field label="上游配置">
           <input className={inputClass()} name="upstreamConfigUrl" defaultValue={selectedProfile?.upstreamConfigUrl ?? ""} disabled={!selectedProfile} />
         </Field>
+        <Field label="流量/到期来源">
+          <select
+            className={inputClass()}
+            name="subscriptionInfoSourceId"
+            defaultValue={selectedProfile?.subscriptionInfoSourceId ?? ""}
+            disabled={!selectedProfile || !subscriptionSources.length}
+          >
+            <option value="">自动汇总所有机场订阅</option>
+            {subscriptionSources.map((source) => (
+              <option key={source.id} value={source.id}>{source.name}{source.enabled ? "" : "（已停用）"}</option>
+            ))}
+          </select>
+        </Field>
         <Field label="节点排除正则">
-          <input className={inputClass()} name="nodeExcludeRegex" defaultValue={selectedProfile?.nodeExcludeRegex ?? ""} placeholder="官网|流量" disabled={!selectedProfile} />
+          <input className={inputClass()} name="nodeExcludeRegex" defaultValue={selectedProfile?.nodeExcludeRegex ?? ""} placeholder="官网|到期时间|剩余流量" disabled={!selectedProfile} />
         </Field>
         <Button type="submit" disabled={!selectedProfile}>保存设置</Button>
       </div>

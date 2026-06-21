@@ -200,8 +200,12 @@ export function applyProfileNodeFilters(
   profile: Pick<Profile, "nodeExcludeRegex">,
 ): URLSearchParams {
   const next = new URLSearchParams(params);
-  if (profile.nodeExcludeRegex?.trim() && !next.has("exclude_remarks")) {
-    next.set("exclude_remarks", profile.nodeExcludeRegex.trim());
+  const explicitExcludeRemarks = next.get("exclude_remarks")?.trim();
+  if (!next.has("exclude") && explicitExcludeRemarks) {
+    next.set("exclude", explicitExcludeRemarks);
+  }
+  if (profile.nodeExcludeRegex?.trim() && !next.has("exclude")) {
+    next.set("exclude", profile.nodeExcludeRegex.trim());
   }
   return next;
 }

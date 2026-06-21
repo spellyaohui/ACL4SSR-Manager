@@ -15,6 +15,7 @@ model Profile {
   defaultTarget     String          @default("clash")
   upstreamConfigUrl String
   nodeExcludeRegex  String?
+  subscriptionInfoSourceId String?
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
   deletedAt         DateTime?
