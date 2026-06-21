@@ -40,6 +40,7 @@ type Source = {
   enabled: boolean;
   sortOrder: number;
   lastStatus: string | null;
+  lastCheckedAt: string | null;
 };
 
 type Rule = {
@@ -118,6 +119,47 @@ const ruleModes = [
 
 function displayRuleType(type: string) {
   return type.replaceAll("_", "-");
+}
+
+type SourceStatus = {
+  ok: boolean;
+  checkedAt: string;
+  userInfo?: {
+    upload: number;
+    download: number;
+    total: number;
+    expire: number | null;
+  };
+  message?: string;
+};
+
+function parseSourceStatus(value: string | null): SourceStatus | null {
+  if (!value) return null;
+  try {
+    return JSON.parse(value) as SourceStatus;
+  } catch {
+    return { ok: false, checkedAt: "", message: value };
+  }
+}
+
+function formatBytes(value: number): string {
+  if (!Number.isFinite(value) || value < 0) return "-";
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  let size = value;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit += 1;
+  }
+  return `${size.toFixed(unit === 0 ? 0 : 2)} ${units[unit]}`;
+}
+
+function formatExpire(value: number | null | undefined): string {
+  if (!value) return "未提供到期";
+  const date = new Date(value * 1000);
+  if (Number.isNaN(date.getTime())) return "未提供到期";
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
@@ -266,9 +308,9 @@ export function RuleManagerApp() {
     setSelectedProfileId((current) => current || data.data[0]?.id || "");
   }, []);
 
-  const loadSources = useCallback(async (profileId = selectedProfileId) => {
+  const loadSources = useCallback(async (profileId = selectedProfileId, refresh = false) => {
     if (!profileId) return;
-    const data = await api<{ data: Source[] }>(`/api/profiles/${profileId}/sources`);
+    const data = await api<{ data: Source[] }>(`/api/profiles/${profileId}/sources${refresh ? "?refresh=1" : ""}`);
     setSources(data.data);
   }, [selectedProfileId]);
 
@@ -600,7 +642,7 @@ export function RuleManagerApp() {
                 onCancelEdit={() => setEditingSource(null)}
                 onToggle={toggleSource}
                 onDelete={deleteSource}
-                onReload={() => loadSources()}
+                onReload={() => loadSources(selectedProfileId, true)}
               />
             ) : null}
 
@@ -747,27 +789,42 @@ function SourcesView({
   return (
     <div className="grid gap-4 xl:grid-cols-[1fr_420px]">
       <TableShell>
-        <table className="w-full min-w-[820px] text-left text-sm">
+        <table className="w-full min-w-[980px] text-left text-sm">
           <thead className="border-b border-border text-xs text-muted-foreground">
-            <tr><th className="p-3">名称</th><th>类型</th><th>状态</th><th>排序</th><th>内容</th><th>操作</th></tr>
+            <tr><th className="p-3">名称</th><th>类型</th><th>状态</th><th>用量/到期</th><th>排序</th><th>内容</th><th>操作</th></tr>
           </thead>
           <tbody>
-            {sources.map((source) => (
-              <tr key={source.id} className="border-b border-border/70">
-                <td className="p-3 font-medium">{source.name}<div className="text-xs text-muted-foreground">{source.tag}</div></td>
-                <td><Badge tone="info">{source.type}</Badge></td>
-                <td>{source.enabled ? <Badge tone="good">启用</Badge> : <Badge>停用</Badge>}</td>
-                <td>{source.sortOrder}</td>
-                <td className="max-w-[420px] break-all text-xs text-muted-foreground">{source.value}</td>
-                <td>
-                  <div className="flex gap-1">
-                    <Button variant="ghost" onClick={() => onEdit(source)}>编辑</Button>
-                    <Button variant="ghost" onClick={() => onToggle(source)}>{source.enabled ? "停用" : "启用"}</Button>
-                    <Button variant="ghost" aria-label="Delete source" onClick={() => onDelete(source)}><Trash2 size={15} /></Button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+            {sources.map((source) => {
+              const sourceStatus = parseSourceStatus(source.lastStatus);
+              const userInfo = sourceStatus?.userInfo;
+              const used = userInfo ? userInfo.upload + userInfo.download : null;
+              return (
+                <tr key={source.id} className="border-b border-border/70">
+                  <td className="p-3 font-medium">{source.name}<div className="text-xs text-muted-foreground">{source.tag}</div></td>
+                  <td><Badge tone="info">{source.type}</Badge></td>
+                  <td>{source.enabled ? <Badge tone="good">启用</Badge> : <Badge>停用</Badge>}</td>
+                  <td className="min-w-[160px] text-xs">
+                    {userInfo ? (
+                      <div className="grid gap-1">
+                        <span className="font-medium">{formatBytes(used ?? 0)} / {formatBytes(userInfo.total)}</span>
+                        <span className="text-muted-foreground">{formatExpire(userInfo.expire)}</span>
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground">{sourceStatus?.message ?? "未获取"}</span>
+                    )}
+                  </td>
+                  <td>{source.sortOrder}</td>
+                  <td className="max-w-[420px] break-all text-xs text-muted-foreground">{source.value}</td>
+                  <td>
+                    <div className="flex gap-1">
+                      <Button variant="ghost" onClick={() => onEdit(source)}>编辑</Button>
+                      <Button variant="ghost" onClick={() => onToggle(source)}>{source.enabled ? "停用" : "启用"}</Button>
+                      <Button variant="ghost" aria-label="Delete source" onClick={() => onDelete(source)}><Trash2 size={15} /></Button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </TableShell>
@@ -802,7 +859,7 @@ function SourcesView({
             <h2 className="text-sm font-semibold">{editingSource ? "编辑订阅源" : "添加订阅源"}</h2>
             <div className="flex gap-1">
               {editingSource ? <Button type="button" variant="ghost" onClick={onCancelEdit}>取消</Button> : null}
-              <Button type="button" variant="ghost" onClick={onReload}><RefreshCw size={15} />刷新</Button>
+              <Button type="button" variant="ghost" onClick={onReload}><RefreshCw size={15} />刷新元信息</Button>
             </div>
           </div>
           <div className="grid gap-3">
