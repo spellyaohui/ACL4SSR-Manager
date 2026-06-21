@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applyProfileNodeFilters } from "./upstream";
+import { applyProfileNodeFilters, managedNodeSourceUrl } from "./upstream";
 
 describe("applyProfileNodeFilters", () => {
   it("adds the profile node exclude regex to subconverter params", () => {
@@ -17,5 +17,19 @@ describe("applyProfileNodeFilters", () => {
     });
 
     expect(params.get("exclude_remarks")).toBe("倍率");
+  });
+});
+
+describe("managedNodeSourceUrl", () => {
+  it("builds the platform managed node source URL", () => {
+    expect(managedNodeSourceUrl("https://acl4ssr.example.com", "token123")).toBe(
+      "https://acl4ssr.example.com/nodes/token123",
+    );
+  });
+
+  it("trims the public base URL trailing slash", () => {
+    expect(managedNodeSourceUrl("https://acl4ssr.example.com/", "token123")).toBe(
+      "https://acl4ssr.example.com/nodes/token123",
+    );
   });
 });

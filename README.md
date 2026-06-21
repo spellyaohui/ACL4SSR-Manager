@@ -259,11 +259,11 @@ npm run build
 
 1. 客户端请求 `/sub/:profileToken?target=clash`。
 2. 平台读取当前 Profile、启用的订阅源、自定义规则和规则模式。
-3. 启用订阅源按排序拼成 `source1|source2|source3` 并传给 subconverter。
-4. 平台生成动态外部配置：
+3. 启用订阅源按排序拼成 `source1|source2|source3`，先由 `/nodes/:profileToken` 调用 subconverter 转成 `mixed` 纯节点源，避免机场 Clash 订阅自带规则覆盖 ACL4SSR 规则。
+4. 平台生成动态外部配置 `/config/:profileToken.ini`：
    - 手工规则在上游规则之前。
    - `过滤上游` 规则会把对应上游 ruleset URL 替换成本平台的过滤版地址。
-5. 平台调用内部 `SUBCONVERTER_URL/sub?...`。
+5. 平台调用内部 `SUBCONVERTER_URL/sub?...`，其中 `url=` 指向本平台 `/nodes/:profileToken`，`config=` 指向本平台 `/config/:profileToken.ini`。
 6. 返回最终 Clash/Mihomo YAML。
 
 上游 ACL4SSR ruleset 会缓存，但每次订阅请求都会读取数据库里的最新自定义规则和订阅源。

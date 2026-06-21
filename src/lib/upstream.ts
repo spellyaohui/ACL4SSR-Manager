@@ -166,6 +166,10 @@ export function applyProfileNodeFilters(
   return next;
 }
 
+export function managedNodeSourceUrl(publicBaseUrl: string, token: string): string {
+  return `${publicBaseUrl.replace(/\/$/, "")}/nodes/${token}`;
+}
+
 export async function buildSubconverterRequest(
   profile: Profile,
   requestUrl: URL,
@@ -189,8 +193,38 @@ export async function buildSubconverterRequest(
 
   let params = new URLSearchParams(requestUrl.searchParams);
   params.set("target", params.get("target") || profile.defaultTarget || "clash");
-  params.set("url", sourcePayload.raw);
+  params.set("url", managedNodeSourceUrl(publicBaseUrl, profile.token));
   params.set("config", `${publicBaseUrl}/config/${profile.token}.ini`);
+  params = applyProfileNodeFilters(params, profile);
+
+  const upstreamUrl = new URL("/sub", env.SUBCONVERTER_URL);
+  for (const [key, value] of params.entries()) {
+    upstreamUrl.searchParams.set(key, value);
+  }
+
+  return { url: upstreamUrl.toString(), sourceItems: sourcePayload.items };
+}
+
+export async function buildNodeConverterRequest(profile: Profile): Promise<{ url: string; sourceItems: string[] }> {
+  const sources = await prisma.profileSource.findMany({
+    where: { profileId: profile.id },
+    orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+  });
+  const sourcePayload = buildSourcePayload(sources.map((source) => ({
+    type: source.type,
+    value: source.value,
+    tag: source.tag,
+    enabled: source.enabled,
+    sortOrder: source.sortOrder,
+  })));
+
+  if (!sourcePayload.items.length) {
+    throw new Error("Profile has no enabled sources");
+  }
+
+  let params = new URLSearchParams();
+  params.set("target", "mixed");
+  params.set("url", sourcePayload.raw);
   params = applyProfileNodeFilters(params, profile);
 
   const upstreamUrl = new URL("/sub", env.SUBCONVERTER_URL);
