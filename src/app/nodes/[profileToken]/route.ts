@@ -1,12 +1,11 @@
 import { apiError } from "@/lib/api";
-import { buildNodeConverterRequest, fetchTextWithTimeout, getProfileByToken } from "@/lib/upstream";
+import { fetchProfileNodeSource, getProfileByToken } from "@/lib/upstream";
 
 export async function GET(_request: Request, context: { params: Promise<{ profileToken: string }> }) {
   const { profileToken } = await context.params;
   try {
     const profile = await getProfileByToken(profileToken);
-    const built = await buildNodeConverterRequest(profile);
-    const content = await fetchTextWithTimeout(built.url, 30000);
+    const content = await fetchProfileNodeSource(profile);
     return new Response(content, {
       headers: {
         "Content-Type": "text/plain; charset=utf-8",

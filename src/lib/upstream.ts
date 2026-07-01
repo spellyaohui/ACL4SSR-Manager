@@ -214,6 +214,138 @@ export function managedNodeSourceUrl(publicBaseUrl: string, token: string): stri
   return `${publicBaseUrl.replace(/\/$/, "")}/nodes/${token}`;
 }
 
+export function isEmptyNodeConverterOutput(content: string): boolean {
+  const trimmed = content.trim();
+  return !trimmed || trimmed === "No nodes were found!";
+}
+
+export function decodeSubscriptionBody(content: string): string {
+  const trimmed = content.trim();
+  if (!trimmed) return trimmed;
+
+  const firstLine = trimmed.split(/\r?\n/)[0]?.trim() ?? "";
+  if (/^([a-z][a-z0-9+.-]*:|\/\/)/i.test(firstLine)) {
+    return trimmed;
+  }
+
+  try {
+    const decoded = Buffer.from(trimmed, "base64").toString("utf8");
+    if (decoded.includes("://")) {
+      return decoded;
+    }
+  } catch {
+    // 非 base64 订阅原样返回
+  }
+
+  return trimmed;
+}
+
+export async function fetchRawNodeSources(profile: Profile): Promise<string> {
+  const sources = await prisma.profileSource.findMany({
+    where: { profileId: profile.id, enabled: true },
+    orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+  });
+
+  const lines: string[] = [];
+  for (const source of sources) {
+    if (source.type === "SUBSCRIPTION") {
+      const body = await fetchTextWithTimeout(source.value.trim());
+      const decoded = decodeSubscriptionBody(body);
+      for (const line of decoded.split(/\r?\n/)) {
+        const normalized = line.trim();
+        if (normalized && !normalized.startsWith("#")) {
+          lines.push(normalized);
+        }
+      }
+      continue;
+    }
+
+    if (source.type === "BULK") {
+      for (const line of source.value.split(/\r?\n/)) {
+        const normalized = line.trim();
+        if (normalized && !normalized.startsWith("#")) {
+          lines.push(normalized);
+        }
+      }
+      continue;
+    }
+
+    const normalized = source.value.trim();
+    if (normalized) {
+      lines.push(normalized);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+export function isClashSubscriptionContent(content: string): boolean {
+  const trimmed = content.trim();
+  return /^port\s*:/m.test(trimmed) || /(^|\n)proxies\s*:/m.test(trimmed);
+}
+
+export function countNodeLinks(content: string): number {
+  const decoded = decodeSubscriptionBody(content);
+  return decoded.split(/\r?\n/).filter((line) => {
+    const normalized = line.trim();
+    return normalized && !normalized.startsWith("#") && /^[a-z][a-z0-9+.-]*:\/\//i.test(normalized);
+  }).length;
+}
+
+export async function profileHasClashYamlSubscription(profile: Profile): Promise<boolean> {
+  const sources = await prisma.profileSource.findMany({
+    where: { profileId: profile.id, enabled: true, type: "SUBSCRIPTION" },
+  });
+
+  for (const source of sources) {
+    const body = await fetchTextWithTimeout(source.value.trim());
+    const decoded = decodeSubscriptionBody(body);
+    if (isClashSubscriptionContent(decoded)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export async function fetchProfileNodeSource(profile: Profile): Promise<string> {
+  const raw = await fetchRawNodeSources(profile);
+  const rawLinks = countNodeLinks(raw);
+  const needsMixedConversion = await profileHasClashYamlSubscription(profile);
+
+  if (!needsMixedConversion && rawLinks > 0) {
+    return raw;
+  }
+
+  try {
+    const built = await buildNodeConverterRequest(profile);
+    const content = await fetchTextWithTimeout(built.url, 30000);
+    if (!isEmptyNodeConverterOutput(content)) {
+      const mixedLinks = countNodeLinks(content);
+      if (rawLinks > mixedLinks) {
+        return raw;
+      }
+      return content;
+    }
+  } catch {
+    // mixed 转换失败时回退到原始订阅内容
+  }
+
+  return raw;
+}
+
+export async function resolveSubconverterNodeSource(
+  profile: Profile,
+  publicBaseUrl: string,
+  sourcePayload: { raw: string },
+): Promise<string> {
+  const needsManagedNodes = await profileHasClashYamlSubscription(profile);
+  if (needsManagedNodes) {
+    return managedNodeSourceUrl(publicBaseUrl, profile.token);
+  }
+  return sourcePayload.raw;
+}
+
 export async function buildSubconverterRequest(
   profile: Profile,
   requestUrl: URL,
@@ -237,7 +369,7 @@ export async function buildSubconverterRequest(
 
   let params = new URLSearchParams(requestUrl.searchParams);
   params.set("target", params.get("target") || profile.defaultTarget || "clash");
-  params.set("url", managedNodeSourceUrl(publicBaseUrl, profile.token));
+  params.set("url", await resolveSubconverterNodeSource(profile, publicBaseUrl, sourcePayload));
   params.set("config", `${publicBaseUrl}/config/${profile.token}.ini`);
   params = applyProfileNodeFilters(params, profile);
 

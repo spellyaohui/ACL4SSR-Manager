@@ -18,7 +18,7 @@ import {
   Trash2,
   Upload,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type Profile = {
   id: string;
@@ -290,6 +290,15 @@ export function RuleManagerApp() {
   const [ruleDiagnosticsLoading, setRuleDiagnosticsLoading] = useState(false);
   const [ruleDiagnosticsError, setRuleDiagnosticsError] = useState("");
   const [preview, setPreview] = useState<{ config: string; subscriptionUrl: string; subconverterUrl: string; rulePreview: string[]; sourceItems: string[] } | null>(null);
+  const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showStatus = useCallback((message: string) => {
+    setStatus(message);
+    if (statusTimerRef.current) {
+      clearTimeout(statusTimerRef.current);
+    }
+    statusTimerRef.current = setTimeout(() => setStatus(""), 5000);
+  }, []);
 
   const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId);
   const filteredRules = useMemo(() => {
@@ -350,6 +359,12 @@ export function RuleManagerApp() {
     document.documentElement.classList.toggle("dark", dark);
   }, [dark]);
 
+  useEffect(() => () => {
+    if (statusTimerRef.current) {
+      clearTimeout(statusTimerRef.current);
+    }
+  }, []);
+
   useEffect(() => {
     api<{ authenticated: boolean }>("/api/auth/me")
       .then((data) => setAuthenticated(data.authenticated))
@@ -384,7 +399,7 @@ export function RuleManagerApp() {
       }),
     });
     event.currentTarget.reset();
-    setStatus("Profile 已创建");
+    showStatus("Profile 已创建");
     await loadProfiles();
   }
 
@@ -392,49 +407,93 @@ export function RuleManagerApp() {
     event.preventDefault();
     if (!selectedProfileId) return;
     const form = new FormData(event.currentTarget);
-    const data = await api<{ data: Source }>(editingSource ? `/api/profiles/${selectedProfileId}/sources/${editingSource.id}` : `/api/profiles/${selectedProfileId}/sources`, {
-      method: editingSource ? "PATCH" : "POST",
-      body: JSON.stringify({
-        name: form.get("name"),
-        type: form.get("type"),
-        value: form.get("value"),
-        tag: form.get("tag") || null,
-        sortOrder: Number(form.get("sortOrder") || sources.length),
-        enabled: form.get("enabled") === "on",
-      }),
-    });
-    event.currentTarget.reset();
-    setSources((current) => {
-      if (editingSource) {
-        return current.map((source) => source.id === data.data.id ? data.data : source);
-      }
-      return [...current, data.data].sort((a, b) => a.sortOrder - b.sortOrder);
-    });
-    setEditingSource(null);
-    setPreview(null);
-    setStatus(editingSource ? "订阅源已更新，列表已刷新" : "订阅源已添加，列表已刷新");
-    await Promise.all([loadSources(), loadProfiles()]);
+    const sourceType = String(form.get("type") || "SUBSCRIPTION");
+    const isEditing = Boolean(editingSource);
+    const sourceName = String(form.get("name") || editingSource?.name || "订阅源");
+    try {
+      const data = await api<{ data: Source }>(isEditing ? `/api/profiles/${selectedProfileId}/sources/${editingSource?.id}` : `/api/profiles/${selectedProfileId}/sources`, {
+        method: isEditing ? "PATCH" : "POST",
+        body: JSON.stringify({
+          name: form.get("name"),
+          type: sourceType,
+          value: form.get("value"),
+          tag: form.get("tag") || null,
+          sortOrder: Number(form.get("sortOrder") || sources.length),
+          enabled: form.get("enabled") === "on",
+        }),
+      });
+      event.currentTarget.reset();
+      setSources((current) => {
+        if (isEditing) {
+          return current.map((source) => source.id === data.data.id ? data.data : source);
+        }
+        return [...current, data.data].sort((a, b) => a.sortOrder - b.sortOrder);
+      });
+      setEditingSource(null);
+      setPreview(null);
+      showStatus(isEditing ? `订阅源「${sourceName}」已保存` : `订阅源「${sourceName}」已添加`);
+      await Promise.all([
+        loadSources(selectedProfileId, sourceType === "SUBSCRIPTION"),
+        loadProfiles(),
+      ]);
+    } catch (error) {
+      showStatus(`订阅源保存失败：${error instanceof Error ? error.message : "未知错误"}`);
+    }
   }
 
   async function toggleSource(source: Source) {
-    await api(`/api/profiles/${selectedProfileId}/sources/${source.id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ enabled: !source.enabled }),
-    });
-    await loadSources();
+    const nextEnabled = !source.enabled;
+    setSources((current) => current.map((item) => (
+      item.id === source.id ? { ...item, enabled: nextEnabled } : item
+    )));
+    try {
+      const data = await api<{ data: Source }>(`/api/profiles/${selectedProfileId}/sources/${source.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ enabled: nextEnabled }),
+      });
+      setSources((current) => current.map((item) => item.id === source.id ? data.data : item));
+      setPreview(null);
+      showStatus(nextEnabled ? `已启用订阅源「${source.name}」` : `已停用订阅源「${source.name}」`);
+      await loadProfiles();
+    } catch (error) {
+      setSources((current) => current.map((item) => (
+        item.id === source.id ? { ...item, enabled: source.enabled } : item
+      )));
+      showStatus(`订阅源状态更新失败：${error instanceof Error ? error.message : "未知错误"}`);
+    }
   }
 
   async function deleteSource(source: Source) {
     if (!window.confirm(`删除订阅源 ${source.name}？`)) return;
-    await api(`/api/profiles/${selectedProfileId}/sources/${source.id}`, { method: "DELETE" });
+    setSources((current) => current.filter((item) => item.id !== source.id));
     if (editingSource?.id === source.id) setEditingSource(null);
-    await loadSources();
+    try {
+      await api(`/api/profiles/${selectedProfileId}/sources/${source.id}`, { method: "DELETE" });
+      setPreview(null);
+      showStatus(`订阅源「${source.name}」已删除`);
+      await Promise.all([loadSources(selectedProfileId), loadProfiles()]);
+    } catch (error) {
+      await loadSources(selectedProfileId);
+      showStatus(`删除失败：${error instanceof Error ? error.message : "未知错误"}`);
+    }
+  }
+
+  async function reloadSourcesMetadata() {
+    if (!selectedProfileId) return;
+    showStatus("正在刷新订阅源元信息…");
+    try {
+      await loadSources(selectedProfileId, true);
+      showStatus("订阅源元信息已刷新");
+    } catch (error) {
+      showStatus(`刷新失败：${error instanceof Error ? error.message : "未知错误"}`);
+    }
   }
 
   async function createOrUpdateRule(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedProfileId) return;
     const form = new FormData(event.currentTarget);
+    const isEditing = Boolean(drawerRule?.id);
     const payload = {
       profileId: selectedProfileId,
       category: form.get("category") || "General",
@@ -446,13 +505,17 @@ export function RuleManagerApp() {
       enabled: form.get("enabled") === "on",
       note: form.get("note") || null,
     };
-    await api(drawerRule ? `/api/rules/${drawerRule.id}` : "/api/rules", {
-      method: drawerRule ? "PATCH" : "POST",
-      body: JSON.stringify(drawerRule ? { ...payload, profileId: undefined } : payload),
-    });
-    setDrawerRule(null);
-    setStatus(drawerRule ? "规则已更新" : "规则已添加");
-    await loadRules();
+    try {
+      await api(isEditing ? `/api/rules/${drawerRule?.id}` : "/api/rules", {
+        method: isEditing ? "PATCH" : "POST",
+        body: JSON.stringify(isEditing ? { ...payload, profileId: undefined } : payload),
+      });
+      setDrawerRule(null);
+      showStatus(isEditing ? "规则已更新" : "规则已添加");
+      await loadRules();
+    } catch (error) {
+      showStatus(`规则保存失败：${error instanceof Error ? error.message : "未知错误"}`);
+    }
   }
 
   async function toggleRule(rule: Rule) {
@@ -512,7 +575,7 @@ export function RuleManagerApp() {
     });
     setProfiles((current) => current.map((profile) => profile.id === data.data.id ? { ...profile, ...data.data } : profile));
     setPreview(null);
-    setStatus(message);
+    showStatus(message);
   }
 
   async function updateSelectedProfile(event: React.FormEvent<HTMLFormElement>) {
@@ -653,7 +716,7 @@ export function RuleManagerApp() {
                 onCancelEdit={() => setEditingSource(null)}
                 onToggle={toggleSource}
                 onDelete={deleteSource}
-                onReload={() => loadSources(selectedProfileId, true)}
+                onReload={() => void reloadSourcesMetadata()}
               />
             ) : null}
 
@@ -844,7 +907,7 @@ function SourcesView({
         </table>
       </TableShell>
       <div className="grid content-start gap-4">
-        <form key={`subscription-info-${selectedProfile?.id ?? "none"}`} onSubmit={onUpdateSubscriptionInfoSource} className="rounded-lg border border-border bg-card p-4">
+        <form key={`subscription-info-${selectedProfile?.id ?? "none"}-${selectedProfile?.subscriptionInfoSourceId ?? ""}`} onSubmit={onUpdateSubscriptionInfoSource} className="rounded-lg border border-border bg-card p-4">
           <div className="mb-3">
             <h2 className="text-sm font-semibold">流量/到期来源</h2>
             <p className="mt-1 text-xs leading-5 text-muted-foreground">
@@ -873,7 +936,7 @@ function SourcesView({
             </div>
           </div>
         </form>
-        <form key={`node-filter-${selectedProfile?.id ?? "none"}`} onSubmit={onUpdateNodeFilter} className="rounded-lg border border-border bg-card p-4">
+        <form key={`node-filter-${selectedProfile?.id ?? "none"}-${selectedProfile?.nodeExcludeRegex ?? ""}`} onSubmit={onUpdateNodeFilter} className="rounded-lg border border-border bg-card p-4">
           <div className="mb-3">
             <h2 className="text-sm font-semibold">节点名称过滤</h2>
             <p className="mt-1 text-xs leading-5 text-muted-foreground">

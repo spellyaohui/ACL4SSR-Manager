@@ -2,7 +2,7 @@
 
 一个自托管的 ACL4SSR/subconverter 规则管理与订阅转换平台。
 
-它的定位是：你只把本平台生成的订阅地址填到 Clash/Mihomo 客户端里，平台每次被客户端请求时都会读取最新数据库规则、最新订阅源和上游 ACL4SSR 配置，然后调用内部 `tindy2013/subconverter` 输出最终 YAML。
+它的定位是：你只把本平台生成的订阅地址填到 Clash/Mihomo 客户端里，平台每次被客户端请求时都会读取最新数据库规则、最新订阅源和上游 ACL4SSR 配置，然后调用内部 subconverter 输出最终 YAML。
 
 ## 核心能力
 
@@ -11,7 +11,7 @@
 - 自定义规则管理：支持 `DOMAIN`、`DOMAIN-SUFFIX`、`DOMAIN-KEYWORD`、`IP-CIDR`、`IP-CIDR6`、`PROCESS-NAME`、`GEOIP`、`FINAL`、`MATCH`。
 - 批量导入 Clash 规则块：可以识别 `#PT`、`#AI`、`#MCP` 这类分类注释。
 - 规则冲突诊断：规则页面会直接提示“异组冲突”“同策略重复”“未命中上游”等状态。
-- 动态订阅转换：保留 `tindy2013/subconverter` 的 URL 订阅转换方式，本平台只负责动态生成配置和过滤版 ruleset。
+- 动态订阅转换：保留 subconverter 的 URL 订阅转换方式，本平台只负责动态生成配置和过滤版 ruleset；内置 subconverter 使用支持 AnyTLS/Hysteria2 等协议的社区分支。
 - 节点过滤：可在设置页或订阅源页填写节点排除正则，例如 `官网|到期时间|剩余流量`，生成时会写入动态配置并传给 subconverter。
 - 流量/到期来源指定：可指定某个机场订阅 URL 作为最终订阅响应头 `subscription-userinfo` 的来源。
 - Docker Compose 部署：`rule-manager` 对外提供 Web 和订阅地址，`subconverter` 只在内部 Docker 网络访问。
@@ -150,7 +150,7 @@ GET /health/ready
 
 ## 发布 Docker 镜像
 
-本项目可以直接构建成一个 `rule-manager` 镜像，另一个服务继续使用官方 `tindy2013/subconverter:latest`。
+本项目可以直接构建成一个 `rule-manager` 镜像，另一个服务使用支持 AnyTLS 的 `asdlokj1qpi23/subconverter:latest`。
 
 ### 构建本地镜像
 
@@ -204,7 +204,7 @@ services:
       - subconverter
 
   subconverter:
-    image: tindy2013/subconverter:latest
+    image: asdlokj1qpi23/subconverter:latest
     container_name: acl4ssr-subconverter
     restart: unless-stopped
     expose:
@@ -260,7 +260,7 @@ npm run build
 
 1. 客户端请求 `/sub/:profileToken?target=clash`。
 2. 平台读取当前 Profile、启用的订阅源、自定义规则和规则模式。
-3. 启用订阅源按排序拼成 `source1|source2|source3`，先由 `/nodes/:profileToken` 调用 subconverter 转成 `mixed` 纯节点源，避免机场 Clash 订阅自带规则覆盖 ACL4SSR 规则。
+3. 启用订阅源按排序拼成 `source1|source2|source3`，先由 `/nodes/:profileToken` 调用 subconverter 转成 `mixed` 纯节点源，避免机场 Clash 订阅自带规则覆盖 ACL4SSR 规则；若 `mixed` 无输出（如 AnyTLS 订阅），则回退为直接拉取并解码原始订阅节点链接。
 4. 平台生成动态外部配置 `/config/:profileToken.ini`：
    - 手工规则按策略组生成 `/custom-rulesets/:profileToken/:rulesetName.list`，并排在上游规则之前。
    - `过滤上游` 规则会把对应上游 ruleset URL 替换成本平台的过滤版地址。
